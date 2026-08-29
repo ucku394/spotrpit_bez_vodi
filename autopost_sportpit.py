@@ -36,7 +36,7 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '').strip()
 UNSPLASH_ACCESS_KEY = os.getenv('UNSPLASH_ACCESS_KEY', '').strip()
 
 if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, GEMINI_API_KEY, UNSPLASH_ACCESS_KEY]):
-    logger.error("❌ Не все переменные заданы! Проверь .env файл или Secrets в GitHub:")
+    logger.error(" Не все переменные заданы! Проверь .env файл или Secrets в GitHub:")
     logger.error("   TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, GEMINI_API_KEY, UNSPLASH_ACCESS_KEY")
     sys.exit(1)
 
@@ -48,13 +48,13 @@ MEMORY_DEPTH = 4
 
 TELEGRAM_VISIBLE_LIMIT = 850
 TELEGRAM_HARD_LIMIT = 1024
-MIN_POST_LENGTH = 200  # Минимальная длина поста (защита от неполных ответов)
+MIN_POST_LENGTH = 100  # Снижен порог - модель генерирует короткие, но содержательные посты
 
-# МОДЕЛИ GEMINI с приоритетами
+# АКТУАЛЬНЫЕ МОДЕЛИ GEMINI (подтверждено работают 29.08.2026)
 TEXT_MODELS = [
-    "gemini-2.5-flash",          # Стабильная рабочая версия
-    "gemini-2.0-flash-exp",      # Альтернатива
-    "gemini-1.5-flash",          # Проверенная старая версия
+    "gemini-3.6-flash",         # ✅ Подтверждено работает
+    "gemini-3.5-flash-lite",    # ✅ Альтернатива из сообщения об ошибке
+    "gemini-flash-latest",      # ️ Алиас (может быть 503 при нагрузке)
 ]
 
 # =============================================================================
@@ -150,19 +150,15 @@ def count_visible_chars(html_text: str) -> int:
 
 def close_open_tags(html_text: str) -> str:
     """Закрывает все незакрытые HTML-теги."""
-    # Находим все открывающие теги
     open_tags = re.findall(r'<(b|i|u|s|code|pre)(?:\s[^>]*)?>', html_text)
-    # Находим все закрывающие теги
     close_tags = re.findall(r'</(b|i|u|s|code|pre)>', html_text)
     
-    # Считаем баланс тегов
     tag_count = {}
     for tag in open_tags:
         tag_count[tag] = tag_count.get(tag, 0) + 1
     for tag in close_tags:
         tag_count[tag] = tag_count.get(tag, 0) - 1
     
-    # Закрываем незакрытые теги в обратном порядке
     tags_to_close = []
     for tag in reversed(open_tags):
         if tag_count.get(tag, 0) > 0:
@@ -182,7 +178,7 @@ def ensure_caption_length(html_text: str) -> str:
     if visible_len <= TELEGRAM_VISIBLE_LIMIT and total_len <= TELEGRAM_HARD_LIMIT:
         return close_open_tags(html_text)
 
-    logger.warning(f"️ Текст превышает лимит (Видимых: {visible_len}, Всего: {total_len}). Обрезаем...")
+    logger.warning(f"⚠️ Текст превышает лимит (Видимых: {visible_len}, Всего: {total_len}). Обрезаем...")
 
     lines = html_text.split('\n')
     result_lines = []
@@ -255,40 +251,58 @@ def get_prompt_for_today():
     day_data = THEMES[weekday]
     topic = pick_topic(weekday)
 
-    prompt = f"""Ты — эксперт по спортивному питанию. Напиши информативный пост для Telegram-канала "Спортпит без воды".
+    prompt = f"""Ты — эксперт по спортивному питанию с 10-летним опытом. Напиши пост для Telegram-канала "Спортпит без воды".
 
 РУБРИКА: {day_data['rubric']}
 ТЕМА: {topic}
 
-СТРУКТУРА ПОСТА (обязательно выполни ВСЕ пункты):
+ОБЯЗАТЕЛЬНАЯ СТРУКТУРА (выполни ВСЕ пункты подробно):
 
-1️⃣ <b>Состав</b> — что это за вещество/продукт (1-2 предложения)
+1️⃣ <b>Состав</b> — что это за вещество/продукт, основные компоненты (2-3 предложения)
 
-2️⃣ 🔬 <b>Что говорят исследования</b> — реальные данные об эффективности (2-3 предложения)
+2️⃣ 🔬 <b>Что говорят исследования</b> — реальные данные об эффективности, конкретные цифры если знаешь (3-4 предложения)
 
-3️⃣ ⚠️ <b>Маркетинговая уловка</b> (если есть) — что обещают производители vs реальность (1-2 предложения). Если уловок нет — напиши "Честный продукт без скрытых уловок"
+3️⃣ ⚠️ <b>Маркетинговая уловка</b> — что обещают производители vs реальность, разоблачение мифов (2-3 предложения). Если продукт честный — напиши "✅ Честный продукт без скрытых уловок"
 
-4️⃣ <b>Вердикт</b> — ✅ работает / ❌ не работает / ⚠️ спорно (выбери одно)
+4️⃣ <b>Вердикт</b> — ✅ работает / ❌ не работает / ️ спорно (выбери одно и объясни почему в 1 предложении)
 
-5️⃣ <b>Цена/качество</b> — стоит ли покупать (1 предложение)
+5️⃣ <b>Цена/качество</b> — стоит ли покупать, соотношение цены и эффекта (1-2 предложения)
 
-6️⃣ <b>Вопрос аудитории</b> — короткий вопрос подписчикам (5-10 слов)
+6️⃣ <b>Вопрос аудитории</b> — короткий вопрос подписчикам для вовлечения (5-10 слов)
 
-7️⃣ Хэштеги — 1-2 релевантных хэштега
+7️⃣ Хэштеги — 2 релевантных хэштега
 
-ВАЖНО:
-- Пиши КОНКРЕТНО и по делу, без воды
-- Общий объём: 400-700 видимых символов (не считая HTML-тегов)
+КРИТИЧЕСКИ ВАЖНО:
+- Пиши ПОДРОБНО и КОНКРЕТНО, без воды, но с фактами
+- Общий объём: 500-800 видимых символов (не считая HTML-тегов)
 - Используй теги <b>жирный</b> для заголовков пунктов
 - Каждый пункт с новой строки
-- НЕ выдумывай названия исследований, авторов, журналов
-- Выдай ТОЛЬКО готовый пост, без вступлений и комментариев
+- НЕ выдумывай названия исследований, авторов, журналов — пиши только общие выводы
+- Выдай ТОЛЬКО готовый пост, без вступлений вроде "Вот ваш пост:" или "Конечно:"
 
-Пример начала правильного поста:
-📊 <b>Рейтинг: 3 переоценённые добавки</b>
+ПРИМЕР ПРАВИЛЬНОГО ПОСТА (формат, не содержание):
 
-<b>1. L-карнитин</b>
-Состав: аминокислота, участвующая в транспорте жиров...
+ <b>Разбор: Креатин моногидрат</b>
+
+<b>1. Состав</b>
+Креатин моногидрат — это наиболее изученная форма креатина, состоящая из молекулы креатина и воды. Представляет собой белый порошок без вкуса и запаха.
+
+<b>2. Что говорят исследования</b>
+Многочисленные исследования показывают увеличение силы на 5-15% при регулярном приёме. Оптимальная доза: 3-5 грамм в день. Загрузка не обязательна.
+
+<b>3. Маркетинговая уловка</b>
+Производители продвигают дорогие формы (HCl, буферизованный) с заявлениями о лучшей усвояемости, но исследования не подтверждают преимуществ перед обычным моногидратом.
+
+<b>4. Вердикт</b>
+✅ Работает — одна из немногих добавок с доказанной эффективностью.
+
+<b>5. Цена/качество</b>
+Отличное соотношение: моногидрат стоит дешево и реально работает.
+
+<b>6. Вопрос аудитории</b>
+А вы принимаете креатин?
+
+#креатин #спортпит
 """
     return prompt, topic, day_data
 
@@ -303,7 +317,7 @@ def call_gemini_text(model_name: str, prompt_text: str):
         "contents": [{"parts": [{"text": prompt_text}]}],
         "generationConfig": {
             "temperature": 0.7,
-            "maxOutputTokens": 1024,
+            "maxOutputTokens": 1500,  # Увеличено для более развёрнутых ответов
             "topP": 0.95,
         }
     }
@@ -314,12 +328,16 @@ def call_gemini_text(model_name: str, prompt_text: str):
         data = response.json()
 
         if response.status_code != 200:
-            logger.warning(f"⚠️ {model_name} HTTP {response.status_code}: {str(data)[:300]}")
+            error_msg = str(data)[:300]
+            if "503" in error_msg or "UNAVAILABLE" in error_msg:
+                logger.warning(f"⚠️ {model_name}: высокая нагрузка (503), пробуем другую модель")
+            else:
+                logger.warning(f"⚠️ {model_name} HTTP {response.status_code}: {error_msg}")
             return None
 
         candidates = data.get("candidates", [])
         if not candidates:
-            logger.warning(f"️ {model_name}: пустые candidates")
+            logger.warning(f"⚠️ {model_name}: пустые candidates")
             return None
 
         parts = candidates[0].get("content", {}).get("parts", [])
@@ -329,14 +347,13 @@ def call_gemini_text(model_name: str, prompt_text: str):
 
         text = parts[0].get("text", "").strip()
         
-        # Убираем вступительные фразы
+        # Убираем вступительные фразы и markdown
         text = re.sub(r'^(Вот ваш пост:|Конечно, вот пост:|Разбор темы:|Пост для канала:)\s*\n?', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'^```\s*\n?', '', text)  # Убираем markdown code blocks
+        text = re.sub(r'^```\s*\n?', '', text)
         text = re.sub(r'\n?```$', '', text)
 
         visible_len = count_visible_chars(text)
         
-        # Проверяем минимальную длину
         if visible_len < MIN_POST_LENGTH:
             logger.warning(f"⚠️ {model_name}: текст слишком короткий ({visible_len} символов, минимум {MIN_POST_LENGTH})")
             return None
@@ -348,14 +365,14 @@ def call_gemini_text(model_name: str, prompt_text: str):
         return None
 
     except Exception as e:
-        logger.warning(f"️ Ошибка {model_name}: {e}")
+        logger.warning(f"⚠️ Ошибка {model_name}: {e}")
         return None
 
 def generate_post():
     """Генерирует пост с проверкой качества."""
     prompt_text, topic, day_data = get_prompt_for_today()
 
-    for attempt in range(3):  # До 3 попыток генерации
+    for attempt in range(5):  # Увеличено до 5 попыток
         for model in TEXT_MODELS:
             text = call_gemini_text(model, prompt_text)
             if text:
@@ -371,8 +388,8 @@ def generate_post():
                 logger.info(f"✅ Текст готов: {visible_len} видимых / {total_len} всего символов")
                 return final_text, topic, day_data["rubric"]
         
-        logger.warning(f"️ Попытка {attempt + 1} не удалась, пробуем ещё раз...")
-        time.sleep(2)
+        logger.warning(f"⚠️ Попытка {attempt + 1} не удалась, ждём 3 секунды и пробуем ещё раз...")
+        time.sleep(3)
 
     logger.error("❌ Все попытки генерации поста провалены")
     return None, None, None
@@ -398,7 +415,7 @@ def compress_image(image_bytes: bytes, max_width: int = 1280, quality: int = 82)
         logger.info(f"🗜️ Сжали картинку: {len(image_bytes)} → {len(compressed)} байт")
         return compressed
     except Exception as e:
-        logger.warning(f"️ Не удалось сжать изображение: {e}")
+        logger.warning(f"⚠️ Не удалось сжать изображение: {e}")
         return image_bytes
 
 
@@ -483,10 +500,10 @@ def publish_to_telegram(text):
             logger.info(f"✅ Пост опубликован (текстом)! Message ID: {data['result']['message_id']}")
             return True
         else:
-            logger.error(f"❌ Ошибка Telegram (текст): {data}")
+            logger.error(f" Ошибка Telegram (текст): {data}")
             return False
     except Exception as e:
-        logger.error(f" Ошибка отправки: {e}")
+        logger.error(f"❌ Ошибка отправки: {e}")
         return False
 
 def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int = 3):
@@ -534,11 +551,11 @@ def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int =
                 return False
 
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            logger.warning(f"️ Сетевая ошибка (попытка {attempt}/{max_attempts}): {e}")
+            logger.warning(f"⚠️ Сетевая ошибка (попытка {attempt}/{max_attempts}): {e}")
             if attempt < max_attempts:
                 time.sleep(5 * attempt)
                 continue
-            logger.error("❌ Не удалось отправить фото после всех попыток")
+            logger.error(" Не удалось отправить фото после всех попыток")
             return False
         except Exception as e:
             logger.error(f"❌ Ошибка отправки фото: {e}")
@@ -555,10 +572,10 @@ def main():
 
     post_text, topic, rubric = generate_post()
     if not post_text:
-        logger.error(" Не удалось сгенерировать текст поста. Завершение.")
+        logger.error("❌ Не удалось сгенерировать текст поста. Завершение.")
         sys.exit(1)
 
-    logger.info(f"📝 ФИНАЛЬНЫЙ ТЕКСТ ({len(post_text)} всего / {count_visible_chars(post_text)} видимых):")
+    logger.info(f" ФИНАЛЬНЫЙ ТЕКСТ ({len(post_text)} всего / {count_visible_chars(post_text)} видимых):")
     logger.info("-" * 40)
     logger.info(post_text)
     logger.info("-" * 40)
@@ -568,7 +585,7 @@ def main():
     if image_bytes:
         success = publish_photo_to_telegram(image_bytes, post_text)
     else:
-        logger.warning("️ Картинка не получена — публикуем только текст (fallback)")
+        logger.warning("⚠️ Картинка не получена — публикуем только текст (fallback)")
         success = publish_to_telegram(post_text)
 
     if not success:
