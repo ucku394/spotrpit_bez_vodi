@@ -46,15 +46,17 @@ if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, GEMINI_API_KEY, UNSPLASH_AC
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'topics_history.json')
 MEMORY_DEPTH = 4  # не повторять подтемы ближайшие ~4 недели
 
-# ЛИМИТ TELEGRAM: caption к фото = 1024 символа ВМЕСТЕ с HTML-тегами
-# Оставляем запас ~70 символов на всякий случай
-TELEGRAM_CAPTION_LIMIT = 950
+# ЛИМИТЫ TELEGRAM: 
+# Жёсткий лимит API = 1024 символа (включая HTML-теги).
+# Мы ставим лимит видимых символов = 850, чтобы оставить ~170 символов на теги <b>, </b> и переносы строк.
+TELEGRAM_VISIBLE_LIMIT = 850
+TELEGRAM_HARD_LIMIT = 1024
 
-# АКТУАЛЬНЫЕ МОДЕЛИ GEMINI (август 2026)
+# АКТУАЛЬНЫЕ МОДЕЛИ GEMINI
 TEXT_MODELS = [
-    "gemini-3.6-flash",       # Актуальная модель (рекомендована Google)
-    "gemini-flash-latest",    # Алиас — всегда указывает на последнюю flash-модель
-    "gemini-2.5-flash-lite",  # Легкая версия как fallback
+    "gemini-2.5-flash",         # Актуальная быстрая модель
+    "gemini-2.5-flash-lite",    # Легкая версия как fallback
+    "gemini-2.0-flash",         # Дополнительный fallback
 ]
 
 # =============================================================================
@@ -63,7 +65,7 @@ TEXT_MODELS = [
 THEMES = {
     0: {
         "rubric": "Разбор добавки",
-        "format_hint": "полный независимый разбор одной конкретной добавки/вещества по шаблону",
+        "format_hint": "полный независимый разбор одной конкретной добавки/вещества",
         "topics": [
             "Креатин моногидрат: работает или маркетинг",
             "Сывороточный протеин (whey): что реально даёт",
@@ -75,30 +77,30 @@ THEMES = {
     },
     1: {
         "rubric": "Маркетинговая уловка под лупой",
-        "format_hint": "разбор конкретного маркетингового приёма на упаковке/в рекламе спортпита по шаблону",
+        "format_hint": "разбор конкретного маркетингового приёма на упаковке/в рекламе",
         "topics": [
             "'Proprietary blend' — почему это способ спрятать реальные дозировки",
-            "'Клинически доказано' без ссылки на исследование — что это значит на деле",
-            "Мега-дозировки витаминов в комплексах: польза или просто цифра на этикетке",
+            "'Клинически доказано' без ссылки на исследование — что это значит",
+            "Мега-дозировки витаминов в комплексах: польза или цифра на этикетке",
             "Фото 'до/после' в рекламе спортпита — как их подделывают",
             "Слово 'натуральный' на упаковке БАДа: юридически ничего не значит",
-            "Скидочные коды у блогеров: как это влияет на объективность обзора",
+            "Скидочные коды у блогеров: как это влияет на объективность",
         ]
     },
     2: {
         "rubric": "Сравнение форм и брендов",
-        "format_hint": "сравнение разных форм одного вещества или подходов по шаблону, с акцентом на цена/качество",
+        "format_hint": "сравнение разных форм одного вещества или подходов, акцент на цена/качество",
         "topics": [
-            "Креатин моногидрат vs HCl vs буферизованный — есть ли разница по исследованиям",
+            "Креатин моногидрат vs HCl vs буферизованный — есть ли разница",
             "Сывороточный концентрат vs изолят vs гидролизат — за что переплата",
-            "Растительный протеин (горох/рис) vs сывороточный — по аминокислотному профилю",
+            "Растительный протеин (горох/рис) vs сывороточный — по аминокислотам",
             "Магний: цитрат vs глицинат vs оксид — усвояемость и цена",
-            "Капсулы vs порошок для одного и того же вещества — есть ли разница в эффекте",
+            "Капсулы vs порошок для одного и того же вещества — есть ли разница",
         ]
     },
     3: {
         "rubric": "Разбор по запросу подписчиков",
-        "format_hint": "разбор конкретного продукта или вещества, о котором чаще всего спрашивают, по шаблону",
+        "format_hint": "разбор конкретного продукта или вещества, о котором часто спрашивают",
         "topics": [
             "ZMA перед сном: работает на тестостерон или нет",
             "Глютамин для восстановления: есть ли смысл при обычном рационе",
@@ -109,7 +111,7 @@ THEMES = {
     },
     4: {
         "rubric": "Коротко: работает / не работает",
-        "format_hint": "сжатый вердикт-пост по спорной добавке, без длинного разбора, но с сохранением логики шаблона в 2-3 предложениях на пункт",
+        "format_hint": "сжатый вердикт-пост по спорной добавке, без длинного разбора",
         "topics": [
             "HMB: стоит ли добавлять к протеину и креатину",
             "Ашваганда для снижения кортизола и роста силы: что говорят данные",
@@ -120,17 +122,17 @@ THEMES = {
     },
     5: {
         "rubric": "Рейтинг недели",
-        "format_hint": "подборка 3-5 пунктов в формате мини-рейтинга (доказанно работает / спорно / маркетинг), каждый пункт с эмодзи-вердиктом",
+        "format_hint": "подборка 3-х пунктов в формате мини-рейтинга с эмодзи-вердиктом",
         "topics": [
             "Топ-3 добавки с самой сильной доказательной базой",
             "3 популярные добавки, эффективность которых сильно преувеличена",
             "Антирейтинг маркетинговых формулировок на этикетках спортпита",
-            "Что из 'must have' у новичков реально не нужно в первый год тренировок",
+            "Что из 'must have' у новичков реально не нужно в первый год",
         ]
     },
     6: {
         "rubric": "Итоги недели",
-        "format_hint": "короткое резюме недели: что разобрали, какой главный вывод, вопрос аудитории на подумать",
+        "format_hint": "короткое резюме недели: что разобрали, главный вывод, вопрос аудитории",
         "topics": [
             "Главный вывод недели одной фразой + что разобрали",
             "Какая добавка из недели удивила даже нас цифрами исследований",
@@ -140,90 +142,74 @@ THEMES = {
 }
 
 # =============================================================================
-# УМНАЯ ОБРЕЗКА ТЕКСТА (с учётом HTML-тегов)
+# УМНАЯ ОБРЕЗКА ТЕКСТА (ПОСТРОЧНАЯ, БЕЗОПАСНАЯ ДЛЯ HTML)
 # =============================================================================
 def strip_html_tags(html_text: str) -> str:
-    """Удаляет HTML-теги и возвращает чистый текст для подсчёта видимых символов."""
+    """Удаляет HTML-теги и возвращает чистый текст."""
     return re.sub(r'<[^>]+>', '', html_text)
-
 
 def count_visible_chars(html_text: str) -> int:
     """Считает количество видимых символов (без HTML-тегов)."""
     return len(strip_html_tags(html_text))
 
-
-def smart_truncate(html_text: str, max_visible: int = TELEGRAM_CAPTION_LIMIT) -> str:
-    """
-    Обрезает HTML-текст так, чтобы видимых символов было не больше max_visible.
-    Не ломает HTML-теги, обрезает по целым словам, добавляет многоточие.
-    """
-    visible = strip_html_tags(html_text)
-    if len(visible) <= max_visible:
-        return html_text
-
-    # Нужно обрезать. Ищем позицию в чистом тексте
-    target_len = max_visible - 1  # место для многоточия
-
-    # Строим карту: позиция в видимом тексте -> позиция в HTML
-    visible_pos = 0
-    html_pos = 0
-    pos_map = {}  # visible_pos -> html_pos
-
-    in_tag = False
-    for i, ch in enumerate(html_text):
-        if ch == '<':
-            in_tag = True
-        elif ch == '>':
-            in_tag = False
-            pos_map[visible_pos] = i + 1  # после закрывающей скобки
-        elif not in_tag:
-            pos_map[visible_pos] = i
-            visible_pos += 1
-
-    # Находим html-позицию, соответствующую target_len видимых символов
-    if target_len not in pos_map:
-        # Берём ближайшую меньшую
-        available = [k for k in pos_map.keys() if k <= target_len]
-        if not available:
-            return html_text[:max_visible] + "…"
-        target_len = max(available)
-
-    cut_html_pos = pos_map[target_len]
-
-    # Обрезаем HTML до этой позиции
-    truncated = html_text[:cut_html_pos + 1]
-
-    # Обрезаем по целому слову (ищем последний пробел)
-    last_space = truncated.rfind(' ')
-    if last_space > len(truncated) * 0.7:  # если нашли пробел не слишком близко к началу
-        truncated = truncated[:last_space]
-
-    # Закрываем все открытые теги
-    truncated = close_open_tags(truncated)
-
-    return truncated.rstrip() + "…"
-
-
 def close_open_tags(html_text: str) -> str:
     """Закрывает все незакрытые HTML-теги в тексте."""
-    # Находим все открывающие и закрывающие теги
     open_tags = re.findall(r'<(b|i|u|s|code|pre|a)[^>]*>', html_text)
     close_tags = re.findall(r'</(b|i|u|s|code|pre|a)>', html_text)
 
-    # Считаем незакрытые
     tag_stack = []
     for tag in open_tags:
         tag_stack.append(tag)
     for tag in close_tags:
         if tag_stack and tag_stack[-1] == tag:
             tag_stack.pop()
-        # если закрывающий тег без открывающего — игнорируем
 
-    # Закрываем в обратном порядке
     for tag in reversed(tag_stack):
         html_text += f"</{tag}>"
-
     return html_text
+
+def ensure_caption_length(html_text: str) -> str:
+    """
+    Гарантирует, что текст влезет в лимит Telegram.
+    Обрезает построчно, чтобы не ломать структуру, и закрывает теги.
+    """
+    visible_len = count_visible_chars(html_text)
+    total_len = len(html_text)
+
+    # Если всё в порядке, возвращаем как есть
+    if visible_len <= TELEGRAM_VISIBLE_LIMIT and total_len <= TELEGRAM_HARD_LIMIT:
+        return html_text
+
+    logger.warning(f"⚠️ Текст превышает лимит (Видимых: {visible_len}, Всего: {total_len}). Обрезаем...")
+
+    lines = html_text.split('\n')
+    result_lines = []
+    current_visible = 0
+    current_total = 0
+
+    # Оставляем запас в 30 символов для многоточия и возможных мелких тегов
+    safe_visible_limit = TELEGRAM_VISIBLE_LIMIT - 30
+    safe_total_limit = TELEGRAM_HARD_LIMIT - 30
+
+    for line in lines:
+        v_len = len(strip_html_tags(line))
+        t_len = len(line)
+
+        # Проверяем, влезет ли следующая строка с учётом переноса (\n = 1 символ)
+        if (current_visible + v_len <= safe_visible_limit) and (current_total + t_len + 1 <= safe_total_limit):
+            result_lines.append(line)
+            current_visible += v_len
+            current_total += t_len + 1
+        else:
+            break
+
+    truncated = '\n'.join(result_lines).rstrip()
+    
+    # Если мы что-то отрезали, добавляем многоточие
+    if count_visible_chars(truncated) < visible_len:
+        truncated += "…"
+
+    return close_open_tags(truncated)
 
 
 # =============================================================================
@@ -238,14 +224,12 @@ def load_history():
             logger.warning(f"⚠️ Не удалось прочитать историю тем: {e}")
     return {}
 
-
 def save_history(history):
     try:
         with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.warning(f"⚠️ Не удалось сохранить историю тем: {e}")
-
 
 def pick_topic(weekday: int) -> str:
     """Выбирает подтему для дня недели, избегая последних MEMORY_DEPTH повторов."""
@@ -268,33 +252,29 @@ def pick_topic(weekday: int) -> str:
 
     return topic
 
-
 def get_prompt_for_today():
     weekday = datetime.now().weekday()
     day_data = THEMES[weekday]
     topic = pick_topic(weekday)
 
-    prompt = f"""Напиши пост для Telegram-канала "Спортпит без воды" — независимые разборы спортивного питания и БАДов на основе исследований, а не маркетинга бренда.
+    prompt = f"""Напиши пост для Telegram-канала "Спортпит без воды".
 
-Рубрика дня: {day_data['rubric']}
-Формат: {day_data['format_hint']}
-Конкретная тема поста: {topic}
+Рубрика: {day_data['rubric']}
+Тема: {topic}
 
-ОБЯЗАТЕЛЬНАЯ СТРУКТУРА ПОСТА:
-1. <b>Состав</b> — что это за вещество/продукт, из чего состоит или что заявлено на этикетке.
-2. 🔬 <b>Что говорит исследование</b> — краткий honest вывод по реальным данным. НИКОГДА не выдумывай конкретные названия исследований, авторов, журналы или цифры.
-3. ⚠️ Если в теме есть маркетинговая уловка — обозначь её явно с этим эмодзи.
-4. <b>Вердикт</b> — ✅ (работает) или ❌ (не работает), либо оба.
-5. <b>Цена/качество</b> — короткий честный вывод.
+ОБЯЗАТЕЛЬНАЯ СТРУКТУРА (каждый пункт — МАКСИМУМ 1 короткая строка):
+1. <b>Состав</b> — что это (1 строка).
+2. 🔬 <b>Исследование</b — честный вывод по данным (1-2 строки). Не выдумывай названия журналов.
+3. ⚠️ <b>Уловка</b> — если есть маркетинг, обозначь его (1 строка). Если нет — пропусти этот пункт.
+4. <b>Вердикт</b> — ✅ работает или ❌ не работает.
+5. <b>Цена/качество</b> — короткий вывод (1 строка).
 
-КРИТИЧЕСКИ ВАЖНО:
-- Общий объём видимого текста (БЕЗ учёта HTML-тегов <b></b>, <i></i>) — максимум 700 символов. Telegram даёт 1024 символа на caption к фото, но HTML-теги тоже считаются. Поэтому пиши КОРОТКО.
-- Используй HTML-теги: <b>жирный</b>, <i>курсив</i>.
-- Эмодзи строго: 🔬 — исследование, ⚠️ — уловка, ✅ — работает, ❌ — не работает.
-- Источник (если точно знаешь) — ОДНОЙ строкой в конце: "Источник: ..."
-- 1-2 хэштега в самом конце.
-- Короткий вопрос аудитории в конце.
-- ВЫДАВАЙ ТОЛЬКО ГОТОВЫЙ ТЕКСТ ПОСТА. Без комментариев, счётчиков, пояснений.
+КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА:
+- СТРОГОЕ ОГРАНИЧЕНИЕ ДЛИНЫ: Весь текст поста (БЕЗ учёта HTML-тегов) должен быть НЕ БОЛЕЕ 600 символов. Пиши предельно сжато, без воды.
+- Используй только теги: <b>жирный</b>, <i>курсив</i>.
+- В конце: 1-2 хэштега и короткий вопрос аудитории (до 7 слов).
+- Источник: если знаешь точный, укажи одной строкой.
+- ВЫДАВАЙ ТОЛЬКО ГОТОВЫЙ ТЕКСТ ПОСТА. Никаких вступлений вроде "Вот ваш пост:".
 """
     return prompt, topic, day_data
 
@@ -302,28 +282,6 @@ def get_prompt_for_today():
 # =============================================================================
 # GEMINI API — ГЕНЕРАЦИЯ ТЕКСТА
 # =============================================================================
-def get_available_models():
-    """Получает список доступных моделей Gemini через API."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
-
-    try:
-        response = requests.get(url, timeout=(5, 15))
-        if response.status_code == 200:
-            data = response.json()
-            models = data.get("models", [])
-            available = [
-                m["name"].replace("models/", "")
-                for m in models
-                if "generateContent" in m.get("supportedGenerationMethods", [])
-            ]
-            logger.info(f"📋 Доступные модели Gemini: {', '.join(available[:10])}")
-            return available
-        return []
-    except Exception as e:
-        logger.warning(f"⚠️ Не удалось получить список моделей: {e}")
-        return []
-
-
 def call_gemini_text(model_name: str, prompt_text: str):
     """Запрашивает текст у Gemini. Возвращает текст или None."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
@@ -332,43 +290,39 @@ def call_gemini_text(model_name: str, prompt_text: str):
         "contents": [{"parts": [{"text": prompt_text}]}],
         "generationConfig": {
             "temperature": 0.7,
-            "maxOutputTokens": 4000
+            "maxOutputTokens": 800 # Ограничиваем токены на выходе, чтобы модель не генерировала много
         }
     }
 
     try:
-        logger.info(f"⏳ Пробуем {model_name} для текста...")
+        logger.info(f"⏳ Генерация текста через {model_name}...")
         response = requests.post(url, json=payload, timeout=(10, 60))
         data = response.json()
 
         if response.status_code != 200:
-            error_msg = json.dumps(data, ensure_ascii=False)[:400]
-            logger.warning(f"⚠️ {model_name} HTTP {response.status_code}: {error_msg}")
+            logger.warning(f"⚠️ {model_name} HTTP {response.status_code}: {str(data)[:200]}")
             return None
 
         candidates = data.get("candidates", [])
         if not candidates:
-            logger.warning(f"⚠️ {model_name}: пустой candidates")
             return None
 
         parts = candidates[0].get("content", {}).get("parts", [])
         if not parts:
-            logger.warning(f"⚠️ {model_name}: пустой parts")
             return None
 
         text = parts[0].get("text", "").strip()
-        finish_reason = candidates[0].get("finishReason", "UNKNOWN")
+        
+        # Убираем возможные вступительные фразы модели
+        text = re.sub(r'^(Вот ваш пост:|Конечно, вот пост:|Разбор темы:)\s*', '', text, flags=re.IGNORECASE)
 
-        logger.info(f"📊 {model_name}: finishReason={finish_reason}, длина={len(text)}")
-
-        if text and len(text) > 20:
+        if text and len(text) > 50:
             return text
         return None
 
     except Exception as e:
         logger.warning(f"⚠️ Ошибка {model_name}: {e}")
         return None
-
 
 def generate_post():
     """Возвращает (текст_поста, тема, рубрика) или (None, None, None) при неудаче."""
@@ -377,29 +331,16 @@ def generate_post():
     for model in TEXT_MODELS:
         text = call_gemini_text(model, prompt_text)
         if text:
-            visible_len = count_visible_chars(text)
-            total_len = len(text)
-
-            logger.info(f"📏 Сгенерировано: {visible_len} видимых / {total_len} всего символов")
-
-            # Если видимых символов больше лимита — умно обрезаем
-            if visible_len > TELEGRAM_CAPTION_LIMIT:
-                logger.warning(f"⚠️ Текст слишком длинный ({visible_len} видимых симв.). Умная обрезка до {TELEGRAM_CAPTION_LIMIT}...")
-                text = smart_truncate(text, TELEGRAM_CAPTION_LIMIT)
-                visible_len = count_visible_chars(text)
-                total_len = len(text)
-
-            # Финальная проверка: всего символов (с HTML) не должно превышать 1024
-            if total_len > 1024:
-                logger.warning(f"⚠️ Всего символов с HTML = {total_len}, обрезаем до 1020...")
-                text = smart_truncate(text, 1020 - (total_len - visible_len))
-                visible_len = count_visible_chars(text)
-                total_len = len(text)
+            # Применяем гарантированную обрезку
+            final_text = ensure_caption_length(text)
+            
+            visible_len = count_visible_chars(final_text)
+            total_len = len(final_text)
 
             logger.info(f"✅ Текст готов: {visible_len} видимых / {total_len} всего символов")
-            return text, topic, day_data["rubric"]
+            return final_text, topic, day_data["rubric"]
 
-    logger.error("❌ Все текстовые модели вернули пустой/короткий текст")
+    logger.error("❌ Все текстовые модели вернули пустой или слишком короткий текст")
     return None, None, None
 
 
@@ -432,25 +373,15 @@ def compress_image(image_bytes: bytes, max_width: int = 1280, quality: int = 82)
 # =============================================================================
 def generate_image(topic: str, rubric: str):
     """Получает качественное реальное фото с Unsplash по ключевым словам."""
-
     base_keywords = [
-        "protein powder scoop",
-        "supplement capsules pills",
-        "supplement label ingredients",
-        "protein shake",
-        "vitamins bottle closeup",
-        "lab research science",
-        "creatine powder",
-        "gym workout",
-        "nutrition facts label",
-        "fitness supplements flatlay"
+        "protein powder scoop", "supplement capsules pills", "supplement label ingredients",
+        "protein shake", "vitamins bottle closeup", "lab research science",
+        "creatine powder", "gym workout", "nutrition facts label", "fitness supplements flatlay"
     ]
-
     selected_keywords = random.sample(base_keywords, min(4, len(base_keywords)))
     query = urllib.parse.quote(" ".join(selected_keywords))
 
     url = f"https://api.unsplash.com/photos/random?query={query}&orientation=landscape&content_filter=high&w=1200&h=630&client_id={UNSPLASH_ACCESS_KEY}"
-
     headers = {"Accept-Version": "v1"}
 
     try:
@@ -459,10 +390,7 @@ def generate_image(topic: str, rubric: str):
 
         if response.status_code == 200:
             data = response.json()
-            image_url = data.get("urls", {}).get("regular")
-            download_url = data.get("urls", {}).get("full")
-
-            final_url = download_url if download_url else image_url
+            final_url = data.get("urls", {}).get("full") or data.get("urls", {}).get("regular")
 
             if final_url:
                 img_response = requests.get(final_url, timeout=(5, 15))
@@ -470,45 +398,29 @@ def generate_image(topic: str, rubric: str):
                     photographer = data.get('user', {}).get('name', 'Unknown')
                     logger.info(f"✅ Фото найдено: {len(img_response.content)} байт (Автор: {photographer})")
                     return compress_image(img_response.content)
-                else:
-                    logger.warning("⚠️ Пустой ответ при скачивании изображения")
-                    return None
-
         elif response.status_code == 401:
             logger.error("❌ Неверный UNSPLASH_ACCESS_KEY!")
             return None
-
         elif response.status_code == 404:
-            logger.warning("⚠️ Unsplash не нашел фото. Пробуем fallback...")
+            # Fallback
             fallback_queries = ["protein", "gym", "fitness food", "workout"]
-            for fallback_query in fallback_queries:
-                fallback_url = f"https://api.unsplash.com/photos/random?query={fallback_query}&orientation=landscape&content_filter=high&w=1200&h=630&client_id={UNSPLASH_ACCESS_KEY}"
+            for fq in fallback_queries:
                 try:
-                    fallback_response = requests.get(fallback_url, headers=headers, timeout=(5, 15))
-                    if fallback_response.status_code == 200:
-                        data = fallback_response.json()
-                        image_url = data.get("urls", {}).get("regular")
-                        if image_url:
-                            img_response = requests.get(image_url, timeout=(5, 15))
+                    fb_url = f"https://api.unsplash.com/photos/random?query={fq}&orientation=landscape&content_filter=high&w=1200&h=630&client_id={UNSPLASH_ACCESS_KEY}"
+                    fb_resp = requests.get(fb_url, headers=headers, timeout=(5, 15))
+                    if fb_resp.status_code == 200:
+                        data = fb_resp.json()
+                        img_url = data.get("urls", {}).get("regular")
+                        if img_url:
+                            img_response = requests.get(img_url, timeout=(5, 15))
                             if img_response.status_code == 200 and len(img_response.content) > 1000:
-                                photographer = data.get('user', {}).get('name', 'Unknown')
-                                logger.info(f"✅ Фото найдено (fallback): {len(img_response.content)} байт")
+                                logger.info(f"✅ Фото найдено (fallback)")
                                 return compress_image(img_response.content)
-                except Exception as e:
-                    logger.warning(f"⚠️ Ошибка fallback '{fallback_query}': {e}")
+                except Exception:
                     continue
-            logger.warning("⚠️ Все fallback запросы не дали результата")
-            return None
-
         elif response.status_code == 429:
             logger.warning("⚠️ Превышен лимит запросов к Unsplash API")
-            return None
-        else:
-            logger.warning(f"⚠️ Unsplash API error: HTTP {response.status_code}")
-            return None
-
-    except requests.exceptions.Timeout:
-        logger.warning("⏱️ Превышено время ожидания Unsplash API")
+            
         return None
     except Exception as e:
         logger.warning(f"⚠️ Ошибка загрузки фото с Unsplash: {e}")
@@ -521,6 +433,12 @@ def generate_image(topic: str, rubric: str):
 def publish_to_telegram(text):
     """Публикует обычное текстовое сообщение (fallback)."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    
+    # Финальная аварийная проверка
+    if len(text) > 1024:
+        text = text[:1020] + "…"
+        text = close_open_tags(text)
+
     payload = {
         "chat_id": TELEGRAM_CHANNEL_ID,
         "text": text,
@@ -531,27 +449,25 @@ def publish_to_telegram(text):
     try:
         response = requests.post(url, json=payload, timeout=(5, 30))
         data = response.json()
-
         if response.status_code == 200 and data.get("ok"):
             logger.info(f"✅ Пост опубликован (текстом)! Message ID: {data['result']['message_id']}")
             return True
         else:
-            logger.error(f"❌ Ошибка Telegram: {data}")
+            logger.error(f"❌ Ошибка Telegram (текст): {data}")
             return False
-
     except Exception as e:
         logger.error(f"❌ Ошибка отправки: {e}")
         return False
-
 
 def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int = 3):
     """Публикует фото вместе с текстом в качестве единой подписи (caption)."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
 
-    # Финальная проверка перед отправкой
+    # Финальная аварийная проверка перед отправкой
     if len(text) > 1024:
-        logger.warning(f"⚠️ Финальная обрезка: {len(text)} → 1020 символов")
-        text = smart_truncate(text, 1020)
+        logger.warning("⚠️ АВАРИЙНАЯ ОБРЕЗКА: текст всё ещё > 1024 символов!")
+        text = text[:1020] + "…"
+        text = close_open_tags(text)
 
     data = {
         "chat_id": TELEGRAM_CHANNEL_ID,
@@ -567,16 +483,17 @@ def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int =
             resp_json = response.json()
 
             if response.status_code == 200 and resp_json.get("ok"):
-                logger.info(f"✅ Пост опубликован! Message ID: {resp_json['result']['message_id']}")
+                logger.info(f"✅ Пост опубликован с фото! Message ID: {resp_json['result']['message_id']}")
                 return True
             else:
-                # Если ошибка из-за длины caption — обрезаем и пробуем ещё
                 error_desc = resp_json.get("description", "")
-                if "caption" in error_desc.lower() or "too long" in error_desc.lower() or "message is too long" in error_desc.lower():
-                    logger.warning(f"⚠️ Telegram отказал: caption слишком длинный. Обрезаем...")
-                    text = smart_truncate(text, 900)
+                if "caption" in error_desc.lower() or "too long" in error_desc.lower():
+                    logger.warning(f"⚠️ Telegram отказал: caption слишком длинный. Обрезаем сильнее...")
+                    # Агрессивная обрезка: берём только первые 800 символов и закрываем теги
+                    text = close_open_tags(text[:800]) + "…"
                     data["caption"] = text
                     continue
+                
                 logger.error(f"❌ Ошибка Telegram: {resp_json}")
                 return False
 
@@ -600,14 +517,16 @@ def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int =
 def main():
     logger.info("🚀 Запуск автопостинга (Спортпит без воды)...")
 
-    available = get_available_models()
-    if available:
-        logger.info(f"📋 Найдено {len(available)} доступных моделей Gemini")
-
     post_text, topic, rubric = generate_post()
     if not post_text:
         logger.error("❌ Не удалось сгенерировать текст поста. Завершение.")
         sys.exit(1)
+
+    # Логируем финальный текст для отладки
+    logger.info(f"📝 ФИНАЛЬНЫЙ ТЕКСТ ({len(post_text)} всего / {count_visible_chars(post_text)} видимых):")
+    logger.info("-" * 40)
+    logger.info(post_text)
+    logger.info("-" * 40)
 
     image_bytes = generate_image(topic, rubric)
 
@@ -622,7 +541,6 @@ def main():
         sys.exit(1)
 
     logger.info("🎉 Готово! Пост успешно опубликован.")
-
 
 if __name__ == "__main__":
     main()
