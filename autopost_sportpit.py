@@ -47,16 +47,15 @@ HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'topics_
 MEMORY_DEPTH = 4  # не повторять подтемы ближайшие ~4 недели
 
 # ЛИМИТЫ TELEGRAM: 
-# Жёсткий лимит API = 1024 символа (включая HTML-теги).
-# Мы ставим лимит видимых символов = 850, чтобы оставить ~170 символов на теги <b>, </b> и переносы строк.
 TELEGRAM_VISIBLE_LIMIT = 850
 TELEGRAM_HARD_LIMIT = 1024
 
-# АКТУАЛЬНЫЕ МОДЕЛИ GEMINI
+# АКТУАЛЬНЫЕ МОДЕЛИ GEMINI (исправлено согласно ошибке API от 29.08.2026)
+# Используем алиас latest первым, чтобы Google сам подставлял актуальную версию без смены кода
 TEXT_MODELS = [
-    "gemini-2.5-flash",         # Актуальная быстрая модель
-    "gemini-2.5-flash-lite",    # Легкая версия как fallback
-    "gemini-2.0-flash",         # Дополнительный fallback
+    "gemini-flash-latest",      # Рекомендованный алиас (автоматически указывает на актуальную, сейчас 3.6)
+    "gemini-3.6-flash",         # Прямо запрошено в сообщении об ошибке 404
+    "gemini-3.5-flash-lite",    # Запрошено в ошибке как альтернатива
 ]
 
 # =============================================================================
@@ -176,7 +175,6 @@ def ensure_caption_length(html_text: str) -> str:
     visible_len = count_visible_chars(html_text)
     total_len = len(html_text)
 
-    # Если всё в порядке, возвращаем как есть
     if visible_len <= TELEGRAM_VISIBLE_LIMIT and total_len <= TELEGRAM_HARD_LIMIT:
         return html_text
 
@@ -187,7 +185,6 @@ def ensure_caption_length(html_text: str) -> str:
     current_visible = 0
     current_total = 0
 
-    # Оставляем запас в 30 символов для многоточия и возможных мелких тегов
     safe_visible_limit = TELEGRAM_VISIBLE_LIMIT - 30
     safe_total_limit = TELEGRAM_HARD_LIMIT - 30
 
@@ -195,7 +192,6 @@ def ensure_caption_length(html_text: str) -> str:
         v_len = len(strip_html_tags(line))
         t_len = len(line)
 
-        # Проверяем, влезет ли следующая строка с учётом переноса (\n = 1 символ)
         if (current_visible + v_len <= safe_visible_limit) and (current_total + t_len + 1 <= safe_total_limit):
             result_lines.append(line)
             current_visible += v_len
@@ -205,7 +201,6 @@ def ensure_caption_length(html_text: str) -> str:
 
     truncated = '\n'.join(result_lines).rstrip()
     
-    # Если мы что-то отрезали, добавляем многоточие
     if count_visible_chars(truncated) < visible_len:
         truncated += "…"
 
@@ -264,7 +259,7 @@ def get_prompt_for_today():
 
 ОБЯЗАТЕЛЬНАЯ СТРУКТУРА (каждый пункт — МАКСИМУМ 1 короткая строка):
 1. <b>Состав</b> — что это (1 строка).
-2. 🔬 <b>Исследование</b — честный вывод по данным (1-2 строки). Не выдумывай названия журналов.
+2. 🔬 <b>Исследование</b> — честный вывод по данным (1-2 строки). Не выдумывай названия журналов.
 3. ⚠️ <b>Уловка</b> — если есть маркетинг, обозначь его (1 строка). Если нет — пропусти этот пункт.
 4. <b>Вердикт</b> — ✅ работает или ❌ не работает.
 5. <b>Цена/качество</b> — короткий вывод (1 строка).
@@ -290,7 +285,7 @@ def call_gemini_text(model_name: str, prompt_text: str):
         "contents": [{"parts": [{"text": prompt_text}]}],
         "generationConfig": {
             "temperature": 0.7,
-            "maxOutputTokens": 800 # Ограничиваем токены на выходе, чтобы модель не генерировала много
+            "maxOutputTokens": 800
         }
     }
 
@@ -312,8 +307,6 @@ def call_gemini_text(model_name: str, prompt_text: str):
             return None
 
         text = parts[0].get("text", "").strip()
-        
-        # Убираем возможные вступительные фразы модели
         text = re.sub(r'^(Вот ваш пост:|Конечно, вот пост:|Разбор темы:)\s*', '', text, flags=re.IGNORECASE)
 
         if text and len(text) > 50:
@@ -331,7 +324,6 @@ def generate_post():
     for model in TEXT_MODELS:
         text = call_gemini_text(model, prompt_text)
         if text:
-            # Применяем гарантированную обрезку
             final_text = ensure_caption_length(text)
             
             visible_len = count_visible_chars(final_text)
@@ -402,7 +394,6 @@ def generate_image(topic: str, rubric: str):
             logger.error("❌ Неверный UNSPLASH_ACCESS_KEY!")
             return None
         elif response.status_code == 404:
-            # Fallback
             fallback_queries = ["protein", "gym", "fitness food", "workout"]
             for fq in fallback_queries:
                 try:
@@ -434,7 +425,6 @@ def publish_to_telegram(text):
     """Публикует обычное текстовое сообщение (fallback)."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
-    # Финальная аварийная проверка
     if len(text) > 1024:
         text = text[:1020] + "…"
         text = close_open_tags(text)
@@ -463,7 +453,6 @@ def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int =
     """Публикует фото вместе с текстом в качестве единой подписи (caption)."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
 
-    # Финальная аварийная проверка перед отправкой
     if len(text) > 1024:
         logger.warning("⚠️ АВАРИЙНАЯ ОБРЕЗКА: текст всё ещё > 1024 символов!")
         text = text[:1020] + "…"
@@ -489,7 +478,6 @@ def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int =
                 error_desc = resp_json.get("description", "")
                 if "caption" in error_desc.lower() or "too long" in error_desc.lower():
                     logger.warning(f"⚠️ Telegram отказал: caption слишком длинный. Обрезаем сильнее...")
-                    # Агрессивная обрезка: берём только первые 800 символов и закрываем теги
                     text = close_open_tags(text[:800]) + "…"
                     data["caption"] = text
                     continue
@@ -522,7 +510,6 @@ def main():
         logger.error("❌ Не удалось сгенерировать текст поста. Завершение.")
         sys.exit(1)
 
-    # Логируем финальный текст для отладки
     logger.info(f"📝 ФИНАЛЬНЫЙ ТЕКСТ ({len(post_text)} всего / {count_visible_chars(post_text)} видимых):")
     logger.info("-" * 40)
     logger.info(post_text)
