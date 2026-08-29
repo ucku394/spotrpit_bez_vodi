@@ -1,0 +1,42 @@
+name: Autopost to Telegram
+
+on:
+  schedule:
+    # Расписание в UTC! Пример ниже — 9:00 по МСК (UTC+3) = 06:00 UTC.
+    # Формат: минута час день месяц день_недели
+    - cron: '0 6 * * *'
+  workflow_dispatch: {}   # позволяет запускать вручную кнопкой "Run workflow"
+
+permissions:
+  contents: write   # нужно, чтобы Action мог закоммитить обновлённую historia тем
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run autopost script
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+        run: python autopost_sportpit.py
+
+      - name: Commit updated topics history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add topics_history.json
+          git diff --staged --quiet || git commit -m "Update topics history [skip ci]"
+          git push
