@@ -1,0 +1,1 @@
+# spotrpit_bez_vodi
