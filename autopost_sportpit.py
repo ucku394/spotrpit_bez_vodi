@@ -2,11 +2,14 @@ import os
 import sys
 import json
 import random
+import time
 import logging
 import urllib.parse
+from io import BytesIO
 from datetime import datetime
 from dotenv import load_dotenv
 import requests
+from PIL import Image
 
 # =============================================================================
 # НАСТРОЙКА ЛОГИРОВАНИЯ
@@ -299,6 +302,36 @@ def generate_post():
 
 
 # =============================================================================
+# СЖАТИЕ ИЗОБРАЖЕНИЯ
+# =============================================================================
+def compress_image(image_bytes: bytes, max_width: int = 1280, quality: int = 82) -> bytes:
+    """
+    Уменьшает размер файла картинки перед отправкой в Telegram:
+    - ограничивает ширину (Unsplash отдаёт full-размер, иногда 3000px+)
+    - конвертирует в JPEG с разумным качеством
+    Это ускоряет отправку и снижает риск таймаута на медленной сети (например, GitHub Actions).
+    """
+    try:
+        img = Image.open(BytesIO(image_bytes))
+        img = img.convert("RGB")  # на случай PNG с альфа-каналом и т.п.
+
+        if img.width > max_width:
+            ratio = max_width / img.width
+            new_size = (max_width, int(img.height * ratio))
+            img = img.resize(new_size, Image.LANCZOS)
+
+        buffer = BytesIO()
+        img.save(buffer, format="JPEG", quality=quality, optimize=True)
+        compressed = buffer.getvalue()
+
+        logger.info(f"🗜️ Сжали картинку: {len(image_bytes)} → {len(compressed)} байт")
+        return compressed
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось сжать изображение, отправляем как есть: {e}")
+        return image_bytes
+
+
+# =============================================================================
 # UNSPLASH API — ПОЛУЧЕНИЕ РЕАЛЬНЫХ ФОТО
 # =============================================================================
 def generate_image(topic: str, rubric: str):
@@ -346,7 +379,7 @@ def generate_image(topic: str, rubric: str):
                 if img_response.status_code == 200 and len(img_response.content) > 1000:
                     photographer = data.get('user', {}).get('name', 'Unknown')
                     logger.info(f"✅ Фото найдено и загружено: {len(img_response.content)} байт (Автор: {photographer})")
-                    return img_response.content
+                    return compress_image(img_response.content)
                 else:
                     logger.warning("⚠️ Пустой ответ при скачивании изображения")
                     return None
@@ -371,7 +404,7 @@ def generate_image(topic: str, rubric: str):
                             if img_response.status_code == 200 and len(img_response.content) > 1000:
                                 photographer = data.get('user', {}).get('name', 'Unknown')
                                 logger.info(f"✅ Фото найдено (fallback: {fallback_query}): {len(img_response.content)} байт (Автор: {photographer})")
-                                return img_response.content
+                                return compress_image(img_response.content)
                 except Exception as e:
                     logger.warning(f"⚠️ Ошибка fallback запроса '{fallback_query}': {e}")
                     continue
@@ -422,31 +455,44 @@ def publish_to_telegram(text):
         return False
 
 
-def publish_photo_to_telegram(image_bytes: bytes, text: str):
-    """Публикует фото вместе с текстом в качестве единой подписи (caption)."""
+def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int = 3):
+    """Публикует фото вместе с текстом в качестве единой подписи (caption).
+    Делает несколько попыток с увеличенным таймаутом — на случай медленной
+    сети раннера (например, GitHub Actions) или единичного сбоя соединения."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
 
-    files = {"photo": ("cover.jpg", image_bytes, "image/jpeg")}
     data = {
         "chat_id": TELEGRAM_CHANNEL_ID,
         "caption": text,
         "parse_mode": "HTML",
     }
 
-    try:
-        response = requests.post(url, data=data, files=files, timeout=(10, 60))
-        resp_json = response.json()
+    for attempt in range(1, max_attempts + 1):
+        files = {"photo": ("cover.jpg", image_bytes, "image/jpeg")}
+        try:
+            logger.info(f"⏳ Отправка фото в Telegram, попытка {attempt}/{max_attempts}...")
+            response = requests.post(url, data=data, files=files, timeout=(15, 180))
+            resp_json = response.json()
 
-        if response.status_code == 200 and resp_json.get("ok"):
-            logger.info(f"✅ Пост с картинкой и текстом опубликован единым сообщением! Message ID: {resp_json['result']['message_id']}")
-            return True
-        else:
-            logger.error(f"❌ Ошибка отправки фото в Telegram: {resp_json}")
+            if response.status_code == 200 and resp_json.get("ok"):
+                logger.info(f"✅ Пост с картинкой и текстом опубликован единым сообщением! Message ID: {resp_json['result']['message_id']}")
+                return True
+            else:
+                logger.error(f"❌ Ошибка отправки фото в Telegram: {resp_json}")
+                return False  # ошибка от самого Telegram API (не сетевая) — повторять бессмысленно
+
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            logger.warning(f"⚠️ Сетевая ошибка при отправке фото (попытка {attempt}/{max_attempts}): {e}")
+            if attempt < max_attempts:
+                time.sleep(5 * attempt)  # пауза перед повтором, увеличивается с каждой попыткой
+                continue
+            logger.error("❌ Не удалось отправить фото после всех попыток")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки фото: {e}")
             return False
 
-    except Exception as e:
-        logger.error(f"❌ Ошибка отправки фото: {e}")
-        return False
+    return False
 
 
 # =============================================================================
