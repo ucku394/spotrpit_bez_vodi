@@ -49,7 +49,10 @@ MEMORY_DEPTH = 4
 TELEGRAM_VISIBLE_LIMIT = 850
 TELEGRAM_HARD_LIMIT = 1024
 MIN_POST_LENGTH = 400  # Минимум 400 символов
-REQUIRED_SECTIONS = ['Состав', 'исследование', 'Вердикт', 'Цена/качество']  # Обязательные разделы
+
+# ВАЖНО: используем основы слов, а не точные словоформы,
+# т.к. в промпте раздел называется "Что говорят исследования" (не "исследование")
+REQUIRED_SECTIONS = ['Состав', 'исследован', 'Вердикт', 'Цена/качество']
 
 # АКТУАЛЬНЫЕ МОДЕЛИ GEMINI
 TEXT_MODELS = [
@@ -145,62 +148,78 @@ THEMES = {
 def strip_html_tags(html_text: str) -> str:
     return re.sub(r'<[^>]+>', '', html_text)
 
+def utf16_len(s: str) -> int:
+    """
+    Длина строки в UTF-16 code units — именно так Telegram считает
+    лимит caption/text (эмодзи вне BMP занимают 2 юнита).
+    """
+    return len(s.encode('utf-16-le')) // 2
+
 def count_visible_chars(html_text: str) -> int:
-    return len(strip_html_tags(html_text))
+    return utf16_len(strip_html_tags(html_text))
 
 def close_open_tags(html_text: str) -> str:
     open_tags = re.findall(r'<(b|i|u|s|code|pre)(?:\s[^>]*)?>', html_text)
     close_tags = re.findall(r'</(b|i|u|s|code|pre)>', html_text)
-    
+
     tag_count = {}
     for tag in open_tags:
         tag_count[tag] = tag_count.get(tag, 0) + 1
     for tag in close_tags:
         tag_count[tag] = tag_count.get(tag, 0) - 1
-    
+
     tags_to_close = []
     for tag in reversed(open_tags):
         if tag_count.get(tag, 0) > 0:
             tags_to_close.append(tag)
             tag_count[tag] -= 1
-    
+
     for tag in tags_to_close:
         html_text += f"</{tag}>"
-    
+
     return html_text
 
 def ensure_caption_length(html_text: str) -> str:
+    """
+    Обрезает HTML-текст так, чтобы видимая (без тегов) длина в UTF-16
+    не превышала лимит Telegram. Обрезка идёт посимвольно, а не
+    построчно — так мы никогда не теряем целые разделы поста,
+    а забираем максимум контента, который реально влезает.
+    """
     visible_len = count_visible_chars(html_text)
-    total_len = len(html_text)
 
-    if visible_len <= TELEGRAM_VISIBLE_LIMIT and total_len <= TELEGRAM_HARD_LIMIT:
+    if visible_len <= TELEGRAM_VISIBLE_LIMIT:
         return close_open_tags(html_text)
 
-    logger.warning(f"⚠️ Текст превышает лимит (Видимых: {visible_len}, Всего: {total_len}). Обрезаем...")
+    logger.warning(f"⚠️ Текст превышает лимит (Видимых: {visible_len}, лимит {TELEGRAM_VISIBLE_LIMIT}). Обрезаем...")
 
-    lines = html_text.split('\n')
-    result_lines = []
+    safe_limit = TELEGRAM_VISIBLE_LIMIT - 1  # запас под символ "…"
+    result = []
     current_visible = 0
-    current_total = 0
+    i = 0
+    n = len(html_text)
 
-    safe_visible_limit = TELEGRAM_VISIBLE_LIMIT - 30
-    safe_total_limit = TELEGRAM_HARD_LIMIT - 30
-
-    for line in lines:
-        v_len = len(strip_html_tags(line))
-        t_len = len(line)
-
-        if (current_visible + v_len <= safe_visible_limit) and (current_total + t_len + 1 <= safe_total_limit):
-            result_lines.append(line)
-            current_visible += v_len
-            current_total += t_len + 1
+    while i < n and current_visible < safe_limit:
+        if html_text[i] == '<':
+            end = html_text.find('>', i)
+            if end == -1:
+                # битый тег без закрывающей скобки — просто прекращаем
+                break
+            # сам тег не занимает видимый бюджет, копируем целиком
+            result.append(html_text[i:end + 1])
+            i = end + 1
         else:
-            break
+            ch = html_text[i]
+            ch_len = utf16_len(ch)
+            if current_visible + ch_len > safe_limit:
+                break
+            result.append(ch)
+            current_visible += ch_len
+            i += 1
 
-    truncated = '\n'.join(result_lines).rstrip()
-    
-    if count_visible_chars(truncated) < visible_len:
-        truncated = truncated.rstrip() + "…"
+    truncated = ''.join(result).rstrip()
+    if truncated and count_visible_chars(truncated) < visible_len:
+        truncated += "…"
 
     return close_open_tags(truncated)
 
@@ -288,14 +307,14 @@ def get_prompt_for_today():
 # GEMINI API
 # =============================================================================
 def validate_post_structure(text: str) -> tuple:
-    """Проверяет, содержит ли пост все обязательные разделы."""
+    """Проверяет, содержит ли пост все обязательные разделы (по основе слова)."""
     text_lower = text.lower()
     missing = []
-    
+
     for section in REQUIRED_SECTIONS:
         if section.lower() not in text_lower:
             missing.append(section)
-    
+
     return len(missing) == 0, missing
 
 def call_gemini_text(model_name: str, prompt_text: str):
@@ -331,19 +350,19 @@ def call_gemini_text(model_name: str, prompt_text: str):
             return None
 
         text = parts[0].get("text", "").strip()
-        
+
         # Убираем вступительные фразы и markdown
         text = re.sub(r'^(Вот ваш пост:|Конечно, вот пост:|Разбор темы:|Пост для канала:)\s*\n?', '', text, flags=re.IGNORECASE)
         text = re.sub(r'^```\s*\n?', '', text)
         text = re.sub(r'\n?```$', '', text)
 
         visible_len = count_visible_chars(text)
-        
+
         # Проверка минимальной длины
         if visible_len < MIN_POST_LENGTH:
             logger.warning(f"⚠️ {model_name}: текст слишком короткий ({visible_len} символов, минимум {MIN_POST_LENGTH})")
             return None
-        
+
         # Проверка структуры
         is_valid, missing = validate_post_structure(text)
         if not is_valid:
@@ -353,7 +372,7 @@ def call_gemini_text(model_name: str, prompt_text: str):
         if len(text) > 50:
             logger.info(f"✅ {model_name}: сгенерировано {visible_len} видимых символов, все разделы на месте")
             return text
-        
+
         return None
 
     except Exception as e:
@@ -374,7 +393,7 @@ def generate_post():
 
                 logger.info(f"✅ Текст готов: {visible_len} видимых / {total_len} всего символов")
                 return final_text, topic, day_data["rubric"]
-        
+
         logger.warning(f"⚠️ Попытка {attempt + 1} не удалась, ждём 2 секунды...")
         time.sleep(2)
 
@@ -456,7 +475,7 @@ def generate_image(topic: str, rubric: str):
                     continue
         elif response.status_code == 429:
             logger.warning("⚠️ Превышен лимит запросов к Unsplash API")
-            
+
         return None
     except Exception as e:
         logger.warning(f"⚠️ Ошибка загрузки фото с Unsplash: {e}")
@@ -468,10 +487,9 @@ def generate_image(topic: str, rubric: str):
 # =============================================================================
 def publish_to_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    
-    if len(text) > 1024:
-        text = text[:1020] + "…"
-        text = close_open_tags(text)
+
+    if count_visible_chars(text) > TELEGRAM_HARD_LIMIT:
+        text = ensure_caption_length(text)
 
     payload = {
         "chat_id": TELEGRAM_CHANNEL_ID,
@@ -497,10 +515,9 @@ def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int =
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
 
     text = close_open_tags(text)
-    if len(text) > 1024:
-        logger.warning("⚠️ АВАРИЙНАЯ ОБРЕЗКА: текст > 1024 символов!")
-        text = text[:1020] + "…"
-        text = close_open_tags(text)
+    if count_visible_chars(text) > TELEGRAM_HARD_LIMIT:
+        logger.warning("⚠️ АВАРИЙНАЯ ОБРЕЗКА: caption превышает лимит Telegram!")
+        text = ensure_caption_length(text)
 
     data = {
         "chat_id": TELEGRAM_CHANNEL_ID,
@@ -530,7 +547,7 @@ def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int =
                     if response.status_code == 200 and resp_json.get("ok"):
                         logger.info(f"✅ Пост опубликован (без HTML)! Message ID: {resp_json['result']['message_id']}")
                         return True
-                
+
                 logger.error(f"❌ Ошибка Telegram: {resp_json}")
                 return False
 
