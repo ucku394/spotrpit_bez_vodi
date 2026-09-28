@@ -52,7 +52,12 @@ TELEGRAM_SAFE_CAPTION_LIMIT = 960
 MIN_POST_LENGTH = 520
 MAX_POST_LENGTH = 2200
 
-TEXT_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash"]
+TEXT_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+]
 
 FORMATS = [
     ("MYTH", "МИФ / ФАКТ", True, 14),
@@ -393,7 +398,7 @@ def build_prompt(fmt, topic):
         "WEEKEND": "Формат <b>НЕДЕЛЯ БЕЗ ВОДЫ</b>: 3 сильных вывода и блок <b>Что разобрать дальше?</b>.",
     }
 
-    length = "550–900" if fmt["image"] else "900–1800"
+    length = "700–1000" if fmt["image"] else "1000–1800"
 
     return f"""
 Ты — главный редактор Telegram-канала «Спортпит без воды».
@@ -438,8 +443,8 @@ def call_gemini_text(model_name: str, prompt_text: str):
     payload = {
         "contents": [{"parts": [{"text": prompt_text}]}],
         "generationConfig": {
-            "temperature": 0.65,
-            "maxOutputTokens": 2048,
+            "temperature": 0.75,
+            "maxOutputTokens": 4096,
             "topP": 0.95,
         }
     }
@@ -495,7 +500,7 @@ def call_gemini_text(model_name: str, prompt_text: str):
 def generate_post(fmt, topic):
     prompt_text = build_prompt(fmt, topic)
 
-    for attempt in range(5):
+    for attempt in range(2):
         for model in TEXT_MODELS:
             text = call_gemini_text(model, prompt_text)
             if text:
