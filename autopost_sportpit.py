@@ -433,9 +433,12 @@ def build_prompt(fmt, topic):
 # GEMINI API
 # =============================================================================
 def validate_post(text: str) -> tuple:
-    text_lower = text.lower()
-    missing = [el for el in REQUIRED_ELEMENTS if el.lower() not in text_lower]
-    return len(missing) == 0, missing
+    visible = strip_html_tags(text).strip()
+    if count_visible_chars(text) < MIN_POST_LENGTH:
+        return False, [f"объём < {MIN_POST_LENGTH}"]
+    if len(visible.split()) < 80:
+        return False, ["мало содержательного текста"]
+    return True, []
 
 def call_gemini_text(model_name: str, prompt_text: str):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
@@ -453,6 +456,10 @@ def call_gemini_text(model_name: str, prompt_text: str):
         logger.info(f"⏳ Генерация через {model_name}...")
         response = requests.post(url, json=payload, timeout=(10, 120))
         data = response.json()
+
+        if response.status_code == 503:
+            logger.warning(f"⚠️ {model_name} HTTP 503 — временно нет мощности Google")
+            return None
 
         if response.status_code != 200:
             logger.warning(f"⚠️ {model_name} HTTP {response.status_code}: {str(data)[:300]}")
@@ -500,19 +507,34 @@ def call_gemini_text(model_name: str, prompt_text: str):
 def generate_post(fmt, topic):
     prompt_text = build_prompt(fmt, topic)
 
-    for attempt in range(2):
-        for model in TEXT_MODELS:
+    for model in TEXT_MODELS:
             text = call_gemini_text(model, prompt_text)
             if text:
                 if count_visible_chars(text) > TELEGRAM_HARD_LIMIT:
                     text = smart_truncate(text, TELEGRAM_HARD_LIMIT)
                 return text
 
-        logger.warning(f"⚠️ Попытка {attempt + 1}/5 не удалась")
-        time.sleep(2)
+    logger.warning("🛟 Все модели Gemini недоступны — используем аварийный пост")
+    return emergency_post(fmt, topic)
 
-    return None
 
+def emergency_post(fmt, topic):
+    lead = fmt["name"]
+    return (
+        f"<b>⚡ {lead}</b>\n\n"
+        f"<b>{topic}</b>\n\n"
+        "Разбираем тему без рекламных обещаний и магических формулировок. "
+        "Главное правило спортпита: надпись на банке сама по себе не доказывает "
+        "заметный результат.\n\n"
+        "<b>Смотрим на 4 вещи:</b>\n"
+        "• что именно должна дать добавка;\n"
+        "• есть ли убедительные данные;\n"
+        "• какая дозировка изучалась;\n"
+        "• насколько эффект практически заметен.\n\n"
+        "<b>Вывод:</b> сначала цель и рацион, затем добавка. "
+        "Красивая банка — это упаковка, а не доказательство эффективности.\n\n"
+        f"{pick_hashtags(topic)}"
+    )
 
 # =============================================================================
 # СЖАТИЕ ИЗОБРАЖЕНИЯ
