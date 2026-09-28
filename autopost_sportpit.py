@@ -492,28 +492,21 @@ def call_gemini_text(model_name: str, prompt_text: str):
         logger.warning(f"⚠️ Ошибка {model_name}: {e}")
         return None
 
-def generate_post():
-    prompt_text, topic, day_data = get_prompt_for_today()
+def generate_post(fmt, topic):
+    prompt_text = build_prompt(fmt, topic)
 
-    for attempt in range(10):
+    for attempt in range(5):
         for model in TEXT_MODELS:
             text = call_gemini_text(model, prompt_text)
             if text:
-                # Проверяем финальную длину
-                if count_visible_chars(text) > TELEGRAM_SAFE_LIMIT:
-                    logger.warning(f"⚠️ Обрезка до {TELEGRAM_SAFE_LIMIT} символов...")
-                    text = smart_truncate(text, TELEGRAM_SAFE_LIMIT)
+                if count_visible_chars(text) > TELEGRAM_HARD_LIMIT:
+                    text = smart_truncate(text, TELEGRAM_HARD_LIMIT)
+                return text
 
-                visible_len = count_visible_chars(text)
-                total_len = len(text)
-                logger.info(f"✅ Пост готов: {visible_len} видимых / {total_len} всего символов")
-                return text, topic, day_data["rubric"]
-
-        logger.warning(f"⚠️ Попытка {attempt + 1} не удалась, ждём...")
+        logger.warning(f"⚠️ Попытка {attempt + 1}/5 не удалась")
         time.sleep(2)
 
-    logger.error("❌ Все попытки провалены")
-    return None, None, None
+    return None
 
 
 # =============================================================================
@@ -543,49 +536,59 @@ def compress_image(image_bytes: bytes, max_width: int = 1280, quality: int = 82)
 # =============================================================================
 # UNSPLASH API
 # =============================================================================
-def generate_image(topic: str, rubric: str):
-    base_keywords = [
-        "protein powder scoop", "supplement capsules pills", "supplement label",
-        "protein shake", "vitamins bottle", "lab research", "creatine powder",
-        "gym workout", "nutrition label", "fitness supplements"
-    ]
-    selected = random.sample(base_keywords, min(3, len(base_keywords)))
-    query = urllib.parse.quote(" ".join(selected))
+def build_image_query(topic, fmt_id):
+    t = topic.lower()
 
-    url = f"https://api.unsplash.com/photos/random?query={query}&orientation=landscape&content_filter=high&w=1200&h=630&client_id={UNSPLASH_ACCESS_KEY}"
-    headers = {"Accept-Version": "v1"}
+    if "креатин" in t:
+        subject = "creatine powder sports nutrition"
+    elif "проте" in t:
+        subject = "whey protein sports nutrition"
+    elif "магни" in t:
+        subject = "magnesium supplement capsules"
+    elif "кофеин" in t or "предтрен" in t:
+        subject = "caffeine pre workout supplement"
+    elif "витамин" in t:
+        subject = "vitamin supplement nutrition"
+    elif fmt_id in ("LABEL", "TRAP"):
+        subject = "supplement nutrition label packaging"
+    elif fmt_id == "BATTLE":
+        subject = "sports supplements comparison still life"
+    else:
+        subject = "sports nutrition supplements gym"
+
+    style = {
+        "MYTH": "editorial fitness photography",
+        "BATTLE": "comparison still life",
+        "LABEL": "macro product label photography",
+        "TRAP": "advertising supplement packaging",
+    }.get(fmt_id, "editorial fitness photography")
+
+    return f"{subject}, {style}, dark background, no people, no text"
+
+def generate_image(topic, fmt_id):
+    # Фото теперь появляется не каждый день и связано с темой.
+    if fmt_id not in {"MYTH", "BATTLE", "LABEL", "TRAP"}:
+        return None
+
+    query = urllib.parse.quote(build_image_query(topic, fmt_id))
+    url = f"https://api.unsplash.com/photos/random?query={query}&orientation=landscape&content_filter=high&client_id={UNSPLASH_ACCESS_KEY}"
 
     try:
-        logger.info(f"⏳ Ищем фото: {query}...")
-        response = requests.get(url, headers=headers, timeout=(5, 15))
+        logger.info(f"⏳ Ищем тематическое фото: {query}...")
+        response = requests.get(url, headers={"Accept-Version": "v1"}, timeout=(5, 15))
 
-        if response.status_code == 200:
-            data = response.json()
-            final_url = data.get("urls", {}).get("full") or data.get("urls", {}).get("regular")
-            if final_url:
-                img_resp = requests.get(final_url, timeout=(5, 15))
-                if img_resp.status_code == 200 and len(img_resp.content) > 1000:
-                    logger.info(f"✅ Фото: {len(img_resp.content)} байт")
-                    return compress_image(img_resp.content)
+        if response.status_code != 200:
+            logger.warning(f"⚠️ Unsplash HTTP {response.status_code}")
+            return None
 
-        elif response.status_code == 401:
-            logger.error("❌ Неверный UNSPLASH_ACCESS_KEY!")
-        elif response.status_code == 404:
-            for fq in ["protein", "gym", "fitness"]:
-                try:
-                    fb_url = f"https://api.unsplash.com/photos/random?query={fq}&orientation=landscape&content_filter=high&w=1200&h=630&client_id={UNSPLASH_ACCESS_KEY}"
-                    fb_resp = requests.get(fb_url, headers=headers, timeout=(5, 15))
-                    if fb_resp.status_code == 200:
-                        data = fb_resp.json()
-                        img_url = data.get("urls", {}).get("regular")
-                        if img_url:
-                            img_resp = requests.get(img_url, timeout=(5, 15))
-                            if img_resp.status_code == 200 and len(img_resp.content) > 1000:
-                                return compress_image(img_resp.content)
-                except Exception:
-                    continue
-        elif response.status_code == 429:
-            logger.warning("⚠️ Лимит Unsplash")
+        data = response.json()
+        image_url = data.get("urls", {}).get("regular")
+        if not image_url:
+            return None
+
+        img_resp = requests.get(image_url, timeout=(5, 15))
+        if img_resp.status_code == 200 and len(img_resp.content) > 1000:
+            return compress_image(img_resp.content)
 
         return None
     except Exception as e:
@@ -680,32 +683,66 @@ def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int =
 # =============================================================================
 # ГЛАВНЫЙ ЦИКЛ
 # =============================================================================
-def main():
-    logger.info("🚀 Запуск автопостинга (Спортпит без воды)...")
+def publish_engagement_poll(fmt_id):
+    polls = {
+        "BATTLE": ("Что выбрали бы вы?", ["Вариант A", "Вариант B"]),
+        "QUESTION": ("Ваш опыт с этой добавкой?", ["Работает", "Не заметил эффекта", "Не пробовал"]),
+        "RANK": ("Что сильнее всего переоценено?", ["Добавки", "Дорогие формы", "Маркетинг"]),
+        "WEEKEND": ("Что разобрать дальше?", ["Протеин/креатин", "Витамины", "Жиросжигатели"]),
+    }
+    if fmt_id not in polls:
+        return
 
-    post_text, topic, rubric = generate_post()
+    question, options = polls[fmt_id]
+    payload = {
+        "chat_id": TELEGRAM_CHANNEL_ID,
+        "question": question,
+        "options": json.dumps(options, ensure_ascii=False),
+        "is_anonymous": True,
+        "allows_multiple_answers": False,
+    }
+
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPoll",
+            json=payload,
+            timeout=(5, 30),
+        )
+        data = response.json()
+        if response.status_code == 200 and data.get("ok"):
+            logger.info("📊 Опрос опубликован")
+        else:
+            logger.warning(f"⚠️ Опрос не опубликован: {data}")
+    except Exception as e:
+        logger.warning(f"⚠️ Ошибка опроса: {e}")
+
+def main():
+    logger.info("🔥 Запуск нового движка «Спортпит без воды»")
+
+    fmt, topic = choose_plan()
+    logger.info(f"🎯 Формат: {fmt['name']} | Тема: {topic}")
+
+    post_text = generate_post(fmt, topic)
     if not post_text:
-        logger.error("❌ Не удалось сгенерировать текст. Завершение.")
+        logger.error("❌ Не удалось сгенерировать пост")
         sys.exit(1)
 
-    logger.info(f"📝 ФИНАЛЬНЫЙ ТЕКСТ ({len(post_text)} / {count_visible_chars(post_text)} видимых):")
-    logger.info("-" * 40)
-    logger.info(post_text)
-    logger.info("-" * 40)
+    logger.info(f"📝 Пост: {count_visible_chars(post_text)} видимых символов")
 
-    image_bytes = generate_image(topic, rubric)
+    image_bytes = generate_image(topic, fmt["id"])
 
     if image_bytes:
         success = publish_photo_to_telegram(image_bytes, post_text)
     else:
-        logger.warning("⚠️ Без фото, текстом")
         success = publish_to_telegram(post_text)
 
     if not success:
-        logger.error("❌ Не удалось опубликовать. Завершение.")
+        logger.error("❌ Не удалось опубликовать")
         sys.exit(1)
 
+    publish_engagement_poll(fmt["id"])
     logger.info("🎉 Готово!")
+
 
 if __name__ == "__main__":
     main()
