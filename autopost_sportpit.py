@@ -242,7 +242,7 @@ def smart_truncate(html_text: str, limit: int) -> str:
     n = len(html_text)
 
     while i < n:
-        if html_html_text[i] == '<':
+        if html_text[i] == '<':
             end = html_text.find('>', i)
             if end == -1:
                 break
@@ -256,7 +256,7 @@ def smart_truncate(html_text: str, limit: int) -> str:
         if visible_acc > limit - 1:
             break
 
-        if ch in '.!?…' and (i >= n or text[i] in ' \n'):
+        if ch in '.!?…' and (i >= n or html_text[i] in ' \n'):
             last_good_end = i
 
     if last_good_end > 0:
