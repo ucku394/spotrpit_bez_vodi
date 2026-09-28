@@ -627,8 +627,8 @@ def publish_to_telegram(text: str) -> bool:
 
 def publish_photo_to_telegram(image_bytes: bytes, text: str, max_attempts: int = 3) -> bool:
     text = close_open_tags(text)
-    if count_visible_chars(text) > TELEGRAM_HARD_LIMIT:
-        text = smart_truncate(text, TELEGRAM_HARD_LIMIT)
+    if count_visible_chars(text) > TELEGRAM_CAPTION_LIMIT:
+        text = smart_truncate(text, TELEGRAM_SAFE_CAPTION_LIMIT)
 
     data = {
         "chat_id": TELEGRAM_CHANNEL_ID,
